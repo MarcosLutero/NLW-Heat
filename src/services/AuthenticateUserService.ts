@@ -1,10 +1,21 @@
 import axios from "axios";
+import { JsonWebTokenError } from "jsonwebtoken";
+
+import prismaCliente from "../prisma";
+import { sign } from "JsonWebToken";
 
 //interface para pegar somente o que eu preciso
 //se for olhar o retorno do insonia ele retorna varias infomações
 //mas eu so quero o access_token
 interface IAccessTokenResponse {
   access_token: string;
+}
+
+interface IUserResponse {
+  avatar_url: string;
+  login: string;
+  id: number;
+  name: string;
 }
 
 class AuthenticateUserService {
@@ -27,13 +38,49 @@ class AuthenticateUserService {
         },
       });
 
-    const response = await axios.get("https://api.github.com/user", {
-      headers: {
-        authorization: `Bearer ${access_tokenResponse.access_token}`,
+    const response = await axios.get<IUserResponse>(
+      "https://api.github.com/user",
+      {
+        headers: {
+          authorization: `Bearer ${access_tokenResponse.access_token}`,
+        },
+      }
+    );
+
+    const { login, id, avatar_url, name } = response.data;
+
+    let user = await prismaCliente.user.findFirst({
+      where: {
+        github_id: id,
       },
     });
 
-    return response.data;
+    if (!user) {
+      user = await prismaCliente.user.create({
+        data: {
+          github_id: id,
+          login,
+          avatar_url,
+          name,
+        },
+      });
+    }
+
+    const token = sign(
+      {
+        user: {
+          name: user.name,
+          avatar_url: user.avatar_url,
+          id: user.id,
+        },
+      },
+      process.env.JWT_SECRET,
+      {
+        subject: user.id,
+        expiresIn: "1d",
+      }
+    );
+    return { token, user };
   }
 }
 
